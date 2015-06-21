@@ -1,0 +1,105 @@
+---
+title: "Practical Machine Learning - Project Writup"
+author: "Istvan Buknicz"
+date: "21. Juni 2015"
+output: html_document
+
+references:
+- id: wle_dataset
+  title: Qualitative Activity Recognition of Weight Lifting Exercises
+  author:
+  - family: Velloso
+    given: Eduardo
+  - family: Bulling
+    given: Andreas
+  - family: Gellersen
+    given: Hans
+  - family: Wallace
+    given: Andreas
+  - family: Fuks
+    given: Hugo
+---
+
+# Overview
+This is the project writeup for the Practical Machine Learning Online Course. You will be guided through the way I built the model. 
+
+# Data
+As it is stated in the task's specification the Weight Lifting Exercise Dataset is going to be used. For more details about this dataset see <http://groupware.les.inf.puc-rio.br/har> [@wle_dataset].
+
+
+# Data Cleaning
+```{r echo=FALSE}
+library(lattice)
+library(ggplot2)
+library(caret)
+set.seed(1175)
+training <- read.csv("data/pml-training.csv")  
+testing <- read.csv("data/pml-testing.csv")
+```
+
+After having loaded the data the summary of the dataset was examined. The training data contained `r ncol(training)` columns. Anyone could promptly see that there are quite a few columns with too many missing values. As an example few colums shown here.
+
+```{r, echo=FALSE}
+summary(training[,c("var_yaw_arm","avg_yaw_arm","kurtosis_picth_arm")])
+```
+
+Considering the too many missing values I decided to drop these columns, together with the timestamp related fields, observation and user_name.
+
+```{r}
+# drop all variables where there are too many NAs
+training <- training[, colSums(is.na(training)) < 19000]
+
+# drop the observation number, user_name and timestamps from the data
+training <- training[, -c(1:2,3:7)]
+
+# drop all variables where there are too many blanks
+training <- training[, colSums(training != "") > 1000]
+
+```
+
+Removing all the above mentioned fields led us to a smaller dataset, now there are only `r ncol(training)` columns for further processing. 
+
+At this point the training dataset was splitted. 65% of data was used for building the model and the rest was used for cross validation.
+```{r, echo=FALSE}
+# split training into train and test set
+inTrain <- createDataPartition(y=training$classe, p=0.65, list=FALSE)
+train <- training[inTrain,]
+vald <- training[-inTrain,]
+```
+
+
+# Prepocessing
+As there are still quite a few columns I wanted to see their correlations.
+```{r, echo=FALSE}
+M <- abs(cor(train[,!colnames(train) %in% c("classe")]))
+diag(M) <- 0
+```
+At 80% threshlold there are `r nrow(which(M > 0.8,arr.ind=T))` correlated columns. To create an even smaller dataset I decided to use Principal Component Analyses.
+```{r, echo=FALSE}
+preProc <- preProcess(train[,!colnames(train) %in% c("classe")],method="pca")
+trainPC <- predict(preProc,train[,!colnames(train) %in% c("classe")])
+```
+Using _preProcess_ function from the _caret_ package the number of columns were further reduced to `r ncol(trainPC)`. 
+
+# Building Model
+For the classification _RandomForest_ was choosen, as it works well with many variables. The method was executed with the default settings.
+
+```{r, echo=FALSE}
+modelFitRf <- train(as.factor(train$classe) ~ .,method="rf",data=trainPC)
+```
+
+# Validation 
+Let's see how good the model performs on the validaton dataset.
+```{r}
+valdPC <- predict(preProc, vald[,!colnames(vald) %in% c("classe")])
+confusionMatrix(vald$classe,predict(modelFitRf,valdPC))
+```
+
+```{r, echo=FALSE}
+missClass = function(val, pred) {
+  sum(val != pred)/length(val)
+}
+```
+Out of sample error is calculated on the validation set, that gives us the error rate `r missClass(vald$classe, predict(modelFitRf,valdPC))*100`%. 
+
+# References
